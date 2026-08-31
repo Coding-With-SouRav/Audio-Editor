@@ -174,7 +174,6 @@ def wait_for_window(window, fullscreen):
         window.toggle_fullscreen()
 
 
-# Load saved settings
 settings = load_config()
 user32=ctypes.windll.user32
 dwmapi=ctypes.windll.dwmapi
@@ -188,12 +187,10 @@ def titlebar():
         dwmapi.DwmSetWindowAttribute(hwnd,attr,ctypes.byref(v),ctypes.sizeof(v))
 
 
-# Read HTML
 with open(r"assets/index.html", "r", encoding="utf-8") as f:
     html = f.read()
 
 html_path=resource_path("assets/index.html")
-# Create window
 args={
     "title":"PDF Text Editor",
     "url":html_path,
@@ -207,10 +204,8 @@ if settings["y"] is not None:args["y"]=settings["y"]
 
 window=webview.create_window(**args)
 
-# Save geometry before the window closes
 window.events.closing += lambda: save_config(window)
 
-# Apply titlebar color and restore fullscreen state
 threading.Thread(
     target=wait_for_window,
     args=(window, settings["fullscreen"]),
