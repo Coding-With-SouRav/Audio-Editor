@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Audio Editor</title>
 
-  <!-- LameJS for MP3 encoding -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js">
   </script>
 
@@ -349,7 +348,6 @@
       letter-spacing: 0.5px;
     }
 
-    /* small screens */
     @media (max-width: 700px) {
       .file-row .btn {
         font-size: 12px;
@@ -960,4 +958,512 @@
             writeStr('data');
             view.setUint32(pos, len - pos - 4, true);
             pos += 4;
-            con
+            const chans = [];
+            for (let i = 0; i < numChan; i++) chans.push(abuf.getChannelData(i));
+            for (let i = 0; i < abuf.length; i++) {
+              for (let ch = 0; ch < numChan; ch++) {
+                let s = Math.max(-1, Math.min(1, chans[ch][i]));
+                view.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                pos += 2;
+              }
+            }
+            return new Blob([buf], { type: "audio/wav" });
+          }
+
+          const wavBlob = bufToWav(newBuffer);
+          const removedDuration = end - start;
+          splitPoints = splitPoints.filter(pt => pt < start || pt > end).map(pt => pt > end ? pt -
+            removedDuration : pt).sort((a, b) => a - b);
+          if (waveform && waveform.length > 0) {
+            const startRatio = startIndex / data.length;
+            const endRatio = endIndex / data.length;
+            const startBar = Math.floor(startRatio * waveform.length);
+            const endBar = Math.ceil(endRatio * waveform.length);
+            waveform.splice(startBar, endBar - startBar);
+          }
+          audio.src = URL.createObjectURL(wavBlob);
+          audio.pause();
+          icon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+          audio.playbackRate = 1;
+          rateSelect.value = "1";
+          await audio.load();
+          selectedSegment = null;
+          setupCanvas();
+          drawWaveform();
+          updateTimingDisplay();
+          showSpecialPopup("Segment deleted!");
+          audioCtx.close();
+        } catch (err) {
+          console.error(err);
+          if (!cancelDelete) showSpecialPopup("Delete failed.");
+        } finally {
+          hideLoading();
+        }
+      };
+
+      // ---- export (pure JS) ----
+      // Helper: render AudioBuffer with speed using OfflineAudioContext
+      // ---- export (pure JS) ----
+      // Helper: render AudioBuffer with speed using OfflineAudioContext
+      async function renderWithSpeed(audioBuffer, speed) {
+        const channels = audioBuffer.numberOfChannels;
+        const sampleRate = audioBuffer.sampleRate;
+        const length = audioBuffer.length;
+        const newLength = Math.ceil(length / speed);
+        const newSampleRate = Math.round(sampleRate * speed);
+        const offlineCtx = new OfflineAudioContext(channels, newLength, newSampleRate);
+        const source = offlineCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.playbackRate.value = speed;
+        source.connect(offlineCtx.destination);
+        source.start(0);
+        return await offlineCtx.startRendering();
+      }
+
+      // WAV encoder (from AudioBuffer)
+      function audioBufferToWav(abuf) {
+        const numChan = abuf.numberOfChannels,
+          len = abuf.length * numChan * 2 + 44,
+          buf = new ArrayBuffer(len),
+          view = new DataView(buf);
+        let pos = 0;
+
+        function writeStr(s) { for (let i = 0; i < s.length; i++) view.setUint8(pos++, s.charCodeAt(i)); }
+        writeStr('RIFF');
+        view.setUint32(pos, len - 8, true);
+        pos += 4;
+        writeStr('WAVE');
+        writeStr('fmt ');
+        view.setUint32(pos, 16, true);
+        pos += 4;
+        view.setUint16(pos, 1, true);
+        pos += 2;
+        view.setUint16(pos, numChan, true);
+        pos += 2;
+        view.setUint32(pos, abuf.sampleRate, true);
+        pos += 4;
+        view.setUint32(pos, abuf.sampleRate * 2 * numChan, true);
+        pos += 4;
+        view.setUint16(pos, numChan * 2, true);
+        pos += 2;
+        view.setUint16(pos, 16, true);
+        pos += 2;
+        writeStr('data');
+        view.setUint32(pos, len - pos - 4, true);
+        pos += 4;
+        const chans = [];
+        for (let i = 0; i < numChan; i++) chans.push(abuf.getChannelData(i));
+        for (let i = 0; i < abuf.length; i++) {
+          for (let ch = 0; ch < numChan; ch++) {
+            let s = Math.max(-1, Math.min(1, chans[ch][i]));
+            view.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            pos += 2;
+          }
+        }
+        return new Blob([buf], { type: "audio/wav" });
+      }
+
+      // MP3 encoder using lamejs
+      function audioBufferToMp3(abuf) {
+        return new Promise((resolve, reject) => {
+          try {
+            const channels = abuf.numberOfChannels;
+            const sampleRate = abuf.sampleRate;
+            const samples = abuf.getChannelData(0);
+            const pcm = new Int16Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+              pcm[i] = Math.max(-32768, Math.min(32767, Math.round(samples[i] * 32768)));
+            }
+            const mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, 192);
+            const mp3Data = [];
+            const blockSize = 1152;
+            for (let i = 0; i < pcm.length; i += blockSize) {
+              const chunk = pcm.subarray(i, i + blockSize);
+              const mp3buf = mp3Encoder.encodeBuffer(chunk);
+              if (mp3buf.length > 0) mp3Data.push(mp3buf);
+            }
+            const finalBuf = mp3Encoder.flush();
+            if (finalBuf.length > 0) mp3Data.push(finalBuf);
+            resolve(new Blob(mp3Data, { type: 'audio/mp3' }));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+
+      // OGG encoder using MediaRecorder (opus)
+      function audioBufferToOgg(abuf) {
+        return new Promise((resolve, reject) => {
+          try {
+            const tempCtx = new AudioContext();
+            const source = tempCtx.createBufferSource();
+            source.buffer = abuf;
+            const dest = tempCtx.createMediaStreamDestination();
+            source.connect(dest);
+            const mimeTypes = ['audio/ogg;codecs=opus', 'audio/ogg', 'audio/webm;codecs=opus'];
+            let mimeType = null;
+            for (const mt of mimeTypes) {
+              if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
+            }
+            if (!mimeType) {
+              mimeType = 'audio/webm;codecs=opus';
+            }
+            const recorder = new MediaRecorder(dest.stream, { mimeType: mimeType });
+            const chunks = [];
+            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.onstop = () => {
+              const blob = new Blob(chunks, { type: mimeType });
+              tempCtx.close();
+              resolve(blob);
+            };
+            recorder.onerror = (e) => { tempCtx.close(); reject(e); };
+            recorder.start();
+            source.start(0);
+            const durationMs = (abuf.length / abuf.sampleRate) * 1000 + 200;
+            setTimeout(() => {
+              if (recorder.state !== 'inactive') recorder.stop();
+            }, durationMs);
+          } catch (e) { reject(e); }
+        });
+      }
+
+      // FLAC: use flac.js from CDN (loaded via script)
+      function audioBufferToFlac(abuf) {
+        return new Promise((resolve, reject) => {
+          try {
+            if (typeof Flac === 'undefined' || !Flac.encoder) {
+              reject(new Error('Flac library not loaded'));
+              return;
+            }
+            const channels = abuf.numberOfChannels;
+            const sampleRate = abuf.sampleRate;
+            const samples = abuf.getChannelData(0);
+            const pcm = new Int16Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+              pcm[i] = Math.max(-32768, Math.min(32767, Math.round(samples[i] * 32768)));
+            }
+            const encoder = new Flac.encoder(sampleRate, channels);
+            const blockSize = 4096;
+            for (let i = 0; i < pcm.length; i += blockSize) {
+              const chunk = pcm.subarray(i, i + blockSize);
+              encoder.encode(chunk);
+            }
+            const flacData = encoder.finish();
+            resolve(new Blob([flacData], { type: 'audio/flac' }));
+          } catch (e) { reject(e); }
+        });
+      }
+
+      // AAC: use aac-encoder from CDN (loaded via script)
+      function audioBufferToAac(abuf) {
+        return new Promise((resolve, reject) => {
+          try {
+            if (typeof AacEncoder === 'undefined') {
+              reject(new Error('AAC encoder library not loaded'));
+              return;
+            }
+            const channels = abuf.numberOfChannels;
+            const sampleRate = abuf.sampleRate;
+            const samples = abuf.getChannelData(0);
+            const pcm = new Float32Array(samples.length);
+            for (let i = 0; i < samples.length; i++) pcm[i] = samples[i];
+            const encoder = new AacEncoder(sampleRate, channels, 128 * 1000);
+            const aacData = encoder.encode(pcm);
+            resolve(new Blob([aacData], { type: 'audio/aac' }));
+          } catch (e) { reject(e); }
+        });
+      }
+
+      // The main export function (modified to use pywebview if available)
+      async function exportAudio(format) {
+        if (!audio.src) {
+          showSpecialPopup("No audio to export!");
+          return;
+        }
+
+        showLoading(true);
+        let cancelled = false;
+        cancelBtn.onclick = () => {
+          cancelled = true;
+          hideLoading();
+          showSpecialPopup("Export cancelled");
+        };
+
+        try {
+          // 1. Fetch current audio
+          const response = await fetch(audio.src);
+          const arrayBuffer = await response.arrayBuffer();
+          if (cancelled) { hideLoading(); return; }
+
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          if (cancelled) { audioCtx.close(); hideLoading(); return; }
+
+          // 2. Apply speed
+          const speed = parseFloat(rateSelect.value) || 1;
+          let renderedBuffer;
+          if (Math.abs(speed - 1) < 0.001) {
+            renderedBuffer = audioBuffer;
+          } else {
+            renderedBuffer = await renderWithSpeed(audioBuffer, speed);
+            if (cancelled) { audioCtx.close(); hideLoading(); return; }
+          }
+
+          // 3. Encode
+          let blob;
+          const lower = format.toLowerCase();
+          switch (lower) {
+            case 'wav':
+              blob = audioBufferToWav(renderedBuffer);
+              break;
+            case 'mp3':
+              blob = await audioBufferToMp3(renderedBuffer);
+              break;
+            case 'ogg':
+              blob = await audioBufferToOgg(renderedBuffer);
+              break;
+            case 'flac':
+              blob = await audioBufferToFlac(renderedBuffer);
+              break;
+            case 'aac':
+              blob = await audioBufferToAac(renderedBuffer);
+              break;
+            default:
+              throw new Error('Unsupported format: ' + format);
+          }
+
+          if (cancelled) { hideLoading(); return; }
+
+          // 4. Build filename
+          const origName = fileTitleEl.textContent !== 'No file loaded' ? fileTitleEl.textContent : 'audio';
+          const baseName = origName.replace(/\.[^.]+$/, '');
+          const filename = `${baseName}_${speed}x.${lower}`;
+
+          // 5. Use pywebview if available, else fallback to anchor download
+          if (window.pywebview && window.pywebview.api && window.pywebview.api.save_export) {
+            // Read blob as base64
+            const reader = new FileReader();
+            reader.onload = async function (e) {
+              const base64 = e.target.result.split(',')[1];
+              try {
+                const result = await window.pywebview.api.save_export(base64, filename);
+                if (result === "cancel") {
+                  showSpecialPopup("Export cancelled");
+                } else if (result === "success") {
+                  showSpecialPopup(`✅ Exported as ${format.toUpperCase()} (${speed}x)`);
+                } else {
+                  showSpecialPopup("❌ Export failed");
+                }
+              } catch (err) {
+                console.error('Export API error:', err);
+                showSpecialPopup("❌ Export failed: " + err.message);
+              } finally {
+                hideLoading();
+              }
+            };
+            reader.onerror = function () {
+              hideLoading();
+              showSpecialPopup("❌ Failed to read blob data");
+            };
+            reader.readAsDataURL(blob);
+          } else {
+            // Fallback: download via anchor
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            showSpecialPopup(`✅ Exported as ${format.toUpperCase()} (${speed}x)`);
+            hideLoading();
+          }
+        } catch (err) {
+          console.error('Export error:', err);
+          if (!cancelled) showSpecialPopup(`❌ Export failed: ${err.message || err}`);
+          hideLoading();
+        }
+      }
+      // ---- export UI ----
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportOptions.style.display = exportOptions.style.display === 'block' ? 'none' : 'block';
+      });
+
+      document.addEventListener('click', () => {
+        exportOptions.style.display = 'none';
+      });
+
+      exportOptions.querySelectorAll('div').forEach(opt => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const format = opt.getAttribute('data-format');
+          exportOptions.style.display = 'none';
+          exportAudio(format);
+        });
+      });
+
+      // ---- play button ----
+      playBtn.onclick = () => {
+        if (!audio.src) return;
+        if (audio.paused) audio.play();
+        else audio.pause();
+      };
+
+      // ---- file loading ----
+      btnSelect.onclick = () => {
+        fileInput.value = "";
+        fileInput.click();
+      };
+
+      fileInput.onchange = async (ev) => {
+        const file = ev.target.files[0];
+        if (!file) return;
+        if (!file.type.startsWith("audio/")) {
+          showSpecialPopup("Please choose an audio file.");
+          return;
+        }
+
+        showLoading(false);
+        cancelLoading = false;
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+          const data = decoded.getChannelData(0);
+          const containerWidth = Math.max(1200, waveScroll.clientWidth * 2);
+          const step = Math.ceil(data.length / containerWidth / 2);
+          const bars = [];
+          for (let i = 0; i < data.length; i += step) {
+            if (cancelLoading) break;
+            let max = 0;
+            const end = Math.min(i + step, data.length);
+            for (let j = i; j < end; j++) max = Math.max(max, Math.abs(data[j]));
+            bars.push(max);
+          }
+          if (!cancelLoading) {
+            waveform = bars;
+            splitPoints = [];
+            selectedSegment = null;
+            const url = URL.createObjectURL(file);
+            audio.src = url;
+            audio.playbackRate = 1;
+            rateSelect.value = "1";
+            audio.currentTime = 0;
+            audio.load();
+            icon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+            fileTitleEl.textContent = file.name;
+            setupCanvas();
+            drawWaveform();
+            updateTimingDisplay();
+
+            // Notify backend (optional)
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.save_audio_file) {
+              try {
+                const reader = new FileReader();
+                reader.onload = async function () {
+                  await window.pywebview.api.save_audio_file(reader.result, file.name);
+                };
+                reader.readAsDataURL(file);
+              } catch (e) { /* ignore */ }
+            }
+          }
+          audioCtx.close();
+        } catch (err) {
+          console.error('File processing error:', err);
+          showSpecialPopup("Failed to process audio.");
+        } finally {
+          hideLoading();
+        }
+      };
+
+      function animate() {
+        drawWaveform();
+        rafId = requestAnimationFrame(animate);
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          const last = undoStack.pop();
+          if (last) {
+            redoStack.push({ src: audio.src, waveform: [...waveform], splitPoints: [...splitPoints] });
+            restoreState(last);
+            showSpecialPopup("Undo!");
+          } else { showSpecialPopup("Nothing to undo."); }
+        }
+        if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          const next = redoStack.pop();
+          if (next) {
+            undoStack.push({ src: audio.src, waveform: [...waveform], splitPoints: [...splitPoints] });
+            restoreState(next);
+            showSpecialPopup("Redo!");
+          } else { showSpecialPopup("Nothing to redo."); }
+        }
+      });
+
+      rateSelect.onchange = () => {
+        audio.playbackRate = parseFloat(rateSelect.value);
+        updateTimingDisplay();
+      };
+
+      window.addEventListener('resize', () => {
+        setupCanvas();
+        drawWaveform();
+      });
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+
+      let flacLoaded = false;
+      let aacLoaded = false;
+
+      const originalExport = exportAudio;
+      exportAudio = async function (format) {
+        const lower = format.toLowerCase();
+        if (lower === 'flac' && typeof Flac === 'undefined') {
+          try {
+            showLoading(true);
+            loadingText.textContent = 'Loading FLAC encoder...';
+            await loadScript('https://cdn.jsdelivr.net/npm/flac.js@0.1.4/flac.min.js');
+            flacLoaded = true;
+          } catch (e) {
+            hideLoading();
+            showSpecialPopup('❌ Failed to load FLAC encoder.');
+            return;
+          }
+        }
+        if (lower === 'aac' && typeof AacEncoder === 'undefined') {
+          try {
+            showLoading(true);
+            loadingText.textContent = 'Loading AAC encoder...';
+            await loadScript('https://cdn.jsdelivr.net/npm/aac-encoder@1.0.0/dist/aac-encoder.min.js');
+            aacLoaded = true;
+          } catch (e) {
+            hideLoading();
+            showSpecialPopup('❌ Failed to load AAC encoder.');
+            return;
+          }
+        }
+        await originalExport(format);
+      };
+
+      setupCanvas();
+      drawWaveform();
+      updateTimingDisplay();
+
+    })();
+  </script>
+
+</body>
+
+</html>
