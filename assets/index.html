@@ -5,6 +5,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Audio Editor</title>
+
+  <!-- LameJS for MP3 encoding -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js">
+  </script>
+
   <style>
     :root {
       --bg: #0f1720;
@@ -40,7 +45,6 @@
       box-shadow: 0 4px 8px rgba(5, 5, 5, 0.941), 0 0 10px rgba(255, 255, 255, 0.1);
       border: 1px solid rgba(16, 185, 129, 0.611);
       transition: all 0.3s ease;
-
       width: calc(100% - 60px);
       max-width: 800px;
       margin-left: auto;
@@ -68,6 +72,7 @@
       gap: 12px;
       align-items: center;
       margin-bottom: 12px;
+      flex-wrap: wrap;
     }
 
     .file-row {
@@ -75,6 +80,7 @@
       gap: 8px;
       align-items: center;
       flex: 1;
+      flex-wrap: wrap;
     }
 
     .btn {
@@ -190,7 +196,6 @@
       box-shadow: 0 6px 8px rgba(0, 0, 0, 0.549);
     }
 
-    /* try to style the popup options (works in many browsers) */
     .speed-select option {
       background: #161E2E;
       color: white;
@@ -204,7 +209,6 @@
       color: white;
     }
 
-    /* hide default dropdown arrow on IE/Edge, mobile keeps its arrow */
     .speed-select::-ms-expand {
       display: none;
     }
@@ -344,6 +348,24 @@
       font-size: 14px;
       letter-spacing: 0.5px;
     }
+
+    /* small screens */
+    @media (max-width: 700px) {
+      .file-row .btn {
+        font-size: 12px;
+        padding: 5px 8px;
+      }
+
+      .speed-select {
+        font-size: 12px;
+        padding: 4px 6px;
+      }
+
+      .play-toggle {
+        width: 44px;
+        height: 44px;
+      }
+    }
   </style>
 </head>
 
@@ -355,27 +377,25 @@
       <div class="file-row">
         <label class="btn" id="btnSelect">Choose Audio</label>
         <input id="fileInput" type="file" accept="audio/*">
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          <div style="display:flex;gap:8px;align-items:center;">
-            <div class="tooltip">
-              <select id="rate" class="speed-select">
-                <option value="0.05">0.05x</option>
-                <option value="0.25">0.25x</option>
-                <option value="0.5">0.5x</option>
-                <option value="0.75">0.75x</option>
-                <option value="1" selected>1x</option>
-                <option value="1.25">1.25x</option>
-                <option value="1.5">1.5x</option>
-                <option value="2">2x</option>
-                <option value="2.5">2.5x</option>
-                <option value="3">3x</option>
-                <option value="3.5">3.5x</option>
-                <option value="4">4x</option>
-              </select>
-              <span class="tooltiptext">Playback speed</span>
-            </div>
-          </div>
+
+        <div class="tooltip">
+          <select id="rate" class="speed-select">
+            <option value="0.05">0.05x</option>
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+            <option value="2.5">2.5x</option>
+            <option value="3">3x</option>
+            <option value="3.5">3.5x</option>
+            <option value="4">4x</option>
+          </select>
+          <span class="tooltiptext">Playback speed</span>
         </div>
+
         <div class="tooltip">
           <button id="splitBtn" class="btn">Split</button>
           <span class="tooltiptext">Split audio at cursor</span>
@@ -385,9 +405,11 @@
           <button id="dltBtn" class="btn">Delete</button>
           <span class="tooltiptext">Delete audio segment</span>
         </div>
+
         <div class="tooltip">
-          <div class="btn">
-            <button id="exportBtn" class="btn">Export ▼</button>
+          <div class="btn export-dropdown" id="exportBtnWrapper">
+            <button id="exportBtn" class="btn"
+              style="background:transparent;border:none;color:inherit;padding:0;cursor:pointer;">Export ▼</button>
             <div class="export-options" id="exportOptions">
               <div data-format="wav">WAV</div>
               <div data-format="mp3">MP3</div>
@@ -398,10 +420,7 @@
           </div>
           <span class="tooltiptext">Export edited audio</span>
         </div>
-
       </div>
-
-
 
       <button class="play-toggle" id="playBtn" aria-label="Play/pause">
         <svg id="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d9f0ff" stroke-width="1.2"
@@ -409,7 +428,6 @@
           <polygon points="5 3 19 12 5 21 5 3"></polygon>
         </svg>
       </button>
-      <!-- <div class="time" id="timeLabel"></div> -->
     </div>
 
     <div class="wave-container">
@@ -425,7 +443,7 @@
 
     <div class="loading-overlay" id="loadingOverlay">
       <div class="loader"></div>
-      <div class="loading-text">Analyzing audio...</div>
+      <div class="loading-text" id="loadingText">Analyzing audio...</div>
       <button id="cancelLoading"
         style="margin-top:30px; padding:6px 14px; border:none; border-radius:6px; background:#f87171; color:white; cursor:pointer;">Cancel</button>
     </div>
@@ -443,17 +461,18 @@
       const waveScroll = document.getElementById('waveScroll');
       const leftLabel = document.getElementById('leftLabel');
       const rightLabel = document.getElementById('rightLabel');
-      const timeLabel = document.getElementById('timeLabel');
       const rateSelect = document.getElementById('rate');
       const splitBtn = document.getElementById('splitBtn');
       const dltBtn = document.getElementById('dltBtn');
       const ctx = waveCanvas.getContext('2d');
       const loadingOverlay = document.getElementById('loadingOverlay');
       const cancelBtn = document.getElementById('cancelLoading');
+      const loadingText = document.getElementById('loadingText');
       const exportBtn = document.getElementById('exportBtn');
       const exportOptions = document.getElementById('exportOptions');
-      const EDGE_THRESHOLD_PX = 8; // pixel threshold for edge detection
-      const EPS = 0.0005; // small epsilon for float comparisons (seconds)
+      const EDGE_THRESHOLD_PX = 8;
+      const EPS = 0.0005;
+
       const audio = new Audio();
 
       let waveform = null;
@@ -461,60 +480,57 @@
       let isDragging = false;
       let canvasWidth = 0;
       let cancelLoading = false;
-      let splitPoints = [];      // array of times in seconds
+      let splitPoints = [];
       let undoStack = [];
       let redoStack = [];
-      let selectedSegment = null; // [start, end] in seconds
+      let selectedSegment = null;
       let cancelDelete = false;
       let isDraggingSplitPoint = false;
-      let draggedSplitIndex = -1;            // index in splitPoints while dragging
-      let draggedSplitOriginalTime = null;   // original time of the split when drag started
+      let draggedSplitIndex = -1;
+      let draggedSplitOriginalTime = null;
       let hoveredSplitIndex = -1;
-      let hoveredSelectionEdge = -1; // 0 => left edge, 1 => right edge
+      let hoveredSelectionEdge = -1;
+      let isDraggingSelectionEdge = false;
+      let draggingSelectionEdgeSide = -1;
 
-
-      cancelBtn.onclick = () => {
-        cancelLoading = true;
-        cancelDelete = true;
-        hideLoading();
-      };
-
-      function showLoading() { loadingOverlay.style.display = 'flex'; }
-      function hideLoading() { loadingOverlay.style.display = 'none'; }
-      function showLoading(isExport = false) {
+      // ---- Loading overlay ----
+      function showLoading(isExport) {
         loadingOverlay.style.display = 'flex';
-        const loadingText = document.querySelector('.loading-text');
-
-        if (isExport) {
-          loadingText.textContent = 'Exporting audio...';
-          // Change cancel button behavior for export
-          cancelLoading.onclick = () => {
-            // This will be overridden in exportAudio with specific logic
-            cancelLoading.clickHandler?.();
-          };
-        } else {
-          loadingText.textContent = 'Analyzing audio...';
-          // Reset to default cancellation behavior
-          cancelLoading.onclick = () => {
-            cancelLoading = true;
-            cancelDelete = true;
-            hideLoading();
-          };
-        }
+        loadingText.textContent = isExport ? 'Exporting audio...' : 'Analyzing audio...';
+        cancelBtn.onclick = () => {
+          cancelLoading = true;
+          cancelDelete = true;
+          hideLoading();
+        };
       }
 
       function hideLoading() {
         loadingOverlay.style.display = 'none';
-        // Reset cancellation flags
         cancelLoading = false;
         cancelDelete = false;
       }
 
-      function approxEqual(a, b, eps = 0.001) {
-        return Math.abs(a - b) <= eps;
-      }
+      // ---- helpers ----
+      function approxEqual(a, b, eps) { return Math.abs(a - b) <= (eps || 0.001); }
 
       function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+      function formatTime(seconds) {
+        if (!seconds || isNaN(seconds)) return "00:00:00:00";
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = Math.floor(seconds % 60);
+        const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
+        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}:${String(ms).padStart(3, '0')}`;
+      }
+
+      function showSpecialPopup(msg) {
+        const popup = document.getElementById('specialPopup');
+        popup.textContent = msg;
+        popup.classList.add('show');
+        clearTimeout(popup.hideTimeout);
+        popup.hideTimeout = setTimeout(() => popup.classList.remove('show'), 1500);
+      }
 
       function getSeekPosition(clientX) {
         if (!waveform || !audio.duration) return 0;
@@ -526,16 +542,39 @@
         return x / totalWidth;
       }
 
-      function showSpecialPopup(message) {
-        const popup = document.getElementById('specialPopup');
-        popup.textContent = message;
-        popup.classList.add('show');
-        clearTimeout(popup.hideTimeout);
-        popup.hideTimeout = setTimeout(() => {
-          popup.classList.remove('show');
-        }, 1500);
+      function handleSeek(clientX) {
+        const ratio = getSeekPosition(clientX);
+        audio.currentTime = ratio * audio.duration;
+        drawWaveform();
       }
 
+      function isNearSplitPoint(clientX, threshold) {
+        if (!audio.duration || splitPoints.length === 0) return -1;
+        const rect = waveCanvas.getBoundingClientRect();
+        const scrollLeft = waveScroll.scrollLeft;
+        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
+        const x = clientX - rect.left + scrollLeft;
+        for (let i = 0; i < splitPoints.length; i++) {
+          const splitX = (splitPoints[i] / audio.duration) * totalWidth;
+          if (Math.abs(splitX - x) <= (threshold || EDGE_THRESHOLD_PX)) return i;
+        }
+        return -1;
+      }
+
+      function isNearSelectionEdge(clientX, threshold) {
+        if (!audio.duration || !selectedSegment) return -1;
+        const rect = waveCanvas.getBoundingClientRect();
+        const scrollLeft = waveScroll.scrollLeft;
+        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
+        const x = clientX - rect.left + scrollLeft;
+        const x1 = (selectedSegment[0] / audio.duration) * totalWidth;
+        const x2 = (selectedSegment[1] / audio.duration) * totalWidth;
+        if (Math.abs(x - x1) <= (threshold || EDGE_THRESHOLD_PX)) return 0;
+        if (Math.abs(x - x2) <= (threshold || EDGE_THRESHOLD_PX)) return 1;
+        return -1;
+      }
+
+      // ---- state management ----
       function saveState() {
         if (!audio.src || !waveform) return;
         undoStack.push({
@@ -557,245 +596,10 @@
         fileTitleEl.textContent = "Restored audio";
         setupCanvas();
         drawWaveform();
+        updateTimingDisplay();
       }
 
-      function handleSeek(clientX) {
-        const ratio = getSeekPosition(clientX);
-        audio.currentTime = ratio * audio.duration;
-        drawWaveform();
-      }
-
-      // Return the index of a split point that is within threshold px of clientX, otherwise -1
-      function isNearSplitPoint(clientX, threshold = EDGE_THRESHOLD_PX) {
-        if (!audio.duration || splitPoints.length === 0) return -1;
-        const rect = waveCanvas.getBoundingClientRect();
-        const scrollLeft = waveScroll.scrollLeft;
-        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
-        const x = clientX - rect.left + scrollLeft;
-        for (let i = 0; i < splitPoints.length; i++) {
-          const splitX = (splitPoints[i] / audio.duration) * totalWidth;
-          if (Math.abs(splitX - x) <= threshold) return i;
-        }
-        return -1;
-      }
-
-      // Return which edge of the current selectedSegment is near clientX: 0 left, 1 right, -1 none
-      function isNearSelectionEdge(clientX, threshold = EDGE_THRESHOLD_PX) {
-        if (!audio.duration || !selectedSegment) return -1;
-        const rect = waveCanvas.getBoundingClientRect();
-        const scrollLeft = waveScroll.scrollLeft;
-        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
-        const x = clientX - rect.left + scrollLeft;
-        const x1 = (selectedSegment[0] / audio.duration) * totalWidth;
-        const x2 = (selectedSegment[1] / audio.duration) * totalWidth;
-        if (Math.abs(x - x1) <= threshold) return 0;
-        if (Math.abs(x - x2) <= threshold) return 1;
-        return -1;
-      }
-
-      // ===== Split button =====
-      splitBtn.onclick = async () => {
-        if (!audio.src || !audio.duration || !waveform) {
-          showSpecialPopup("No audio loaded to split!");
-          return;
-        }
-        const splitTime = audio.currentTime;
-        splitPoints.push(splitTime);
-        splitPoints = Array.from(new Set(splitPoints.sort((a, b) => a - b)));
-        drawWaveform();
-      };
-
-      // ===== Right click selection (contextmenu) =====
-      waveCanvas.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (!audio.duration || splitPoints.length === 0) {
-          selectedSegment = null;
-          drawWaveform();
-          return;
-        }
-
-        const rect = waveCanvas.getBoundingClientRect();
-        const x = e.clientX - rect.left + waveScroll.scrollLeft;
-        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
-        const ratio = Math.max(0, Math.min(1, x / totalWidth));
-        const clickTime = ratio * audio.duration;
-
-        const sorted = splitPoints.slice().sort((a, b) => a - b);
-        let start = 0, end = audio.duration;
-        for (let i = 0; i < sorted.length; i++) {
-          if (clickTime < sorted[i]) {
-            end = sorted[i];
-            start = i > 0 ? sorted[i - 1] : 0;
-            break;
-          }
-        }
-        if (clickTime >= (sorted[sorted.length - 1] || 0)) {
-          start = sorted.length ? sorted[sorted.length - 1] : 0;
-          end = audio.duration;
-        }
-
-        if (end - start <= 0.001) selectedSegment = null;
-        else selectedSegment = [start, end];
-
-        drawWaveform();
-      });
-
-      // Track whether user is dragging a selection edge (not necessarily a split line)
-      let isDraggingSelectionEdge = false;
-      let draggingSelectionEdgeSide = -1; // 0 left, 1 right
-
-      waveCanvas.addEventListener('mousedown', (e) => {
-        if (!audio.duration) return;
-
-        // Left-button only for dragging/seeking
-        if (e.button !== 0) return;
-
-        // 1) Priority: if near a split point, start dragging that split point (this allows moving the yellow line)
-        const splitIndex = isNearSplitPoint(e.clientX);
-        if (splitIndex >= 0) {
-          isDraggingSplitPoint = true;
-          draggedSplitIndex = splitIndex;
-          draggedSplitOriginalTime = splitPoints[splitIndex];
-          // while dragging, do NOT sort splitPoints until mouseup to keep index stable
-          e.preventDefault();
-          return;
-        }
-
-        // 2) If near a selection edge (even if that edge is not exactly a split), allow resizing selection
-        const selEdge = isNearSelectionEdge(e.clientX);
-        if (selEdge >= 0) {
-          isDraggingSelectionEdge = true;
-          draggingSelectionEdgeSide = selEdge;
-          e.preventDefault();
-          return;
-        }
-
-        // 3) Otherwise start normal seek dragging
-        isDragging = true;
-        handleSeek(e.clientX);
-      });
-
-      document.addEventListener('mousemove', (e) => {
-        if (!audio.duration) return;
-
-        const rect = waveCanvas.getBoundingClientRect();
-        const scrollLeft = waveScroll.scrollLeft;
-        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
-        let x = e.clientX - rect.left + scrollLeft;
-        x = clamp(x, 0, totalWidth);
-        const newTime = (x / totalWidth) * audio.duration;
-
-        // 1️⃣ Dragging a split point
-        if (isDraggingSplitPoint && draggedSplitIndex >= 0) {
-          const prev = (draggedSplitIndex > 0) ? splitPoints[draggedSplitIndex - 1] : 0;
-          const next = (draggedSplitIndex < splitPoints.length - 1) ? splitPoints[draggedSplitIndex + 1] : audio.duration;
-          splitPoints[draggedSplitIndex] = clamp(newTime, prev + EPS, next - EPS);
-
-          // Update selected segment edges if tied to this split
-          if (selectedSegment) {
-            if (approxEqual(selectedSegment[0], draggedSplitOriginalTime, 0.01)) {
-              selectedSegment[0] = splitPoints[draggedSplitIndex];
-              if (selectedSegment[0] >= selectedSegment[1]) selectedSegment[0] = Math.max(0, selectedSegment[1] - EPS);
-            }
-            if (approxEqual(selectedSegment[1], draggedSplitOriginalTime, 0.01)) {
-              selectedSegment[1] = splitPoints[draggedSplitIndex];
-              if (selectedSegment[1] <= selectedSegment[0]) selectedSegment[1] = Math.min(audio.duration, selectedSegment[0] + EPS);
-            }
-          }
-
-          hoveredSplitIndex = draggedSplitIndex;
-          waveCanvas.style.cursor = 'col-resize';
-          drawWaveform();
-          return;
-        }
-
-        // 2️⃣ Dragging a selection edge
-        if (isDraggingSelectionEdge && selectedSegment) {
-          if (draggingSelectionEdgeSide === 0) {
-            selectedSegment[0] = clamp(newTime, 0, selectedSegment[1] - 0.01);
-          } else {
-            selectedSegment[1] = clamp(newTime, selectedSegment[0] + 0.01, audio.duration);
-          }
-
-          // Snap selection edge to nearby split points
-          for (let i = 0; i < splitPoints.length; i++) {
-            if (approxEqual(splitPoints[i], selectedSegment[0], 0.015) && draggingSelectionEdgeSide === 0) {
-              splitPoints[i] = selectedSegment[0];
-            }
-            if (approxEqual(splitPoints[i], selectedSegment[1], 0.015) && draggingSelectionEdgeSide === 1) {
-              splitPoints[i] = selectedSegment[1];
-            }
-          }
-
-          waveCanvas.style.cursor = 'col-resize';
-          drawWaveform();
-          return;
-        }
-
-        // 3️⃣ Normal seek dragging
-        if (isDragging && e.buttons === 1) {
-          audio.currentTime = newTime;
-          drawWaveform();
-          return;
-        }
-
-        // 4️⃣ Hover feedback
-        const splitIndex = isNearSplitPoint(e.clientX);
-        const selEdge = isNearSelectionEdge(e.clientX);
-
-        hoveredSplitIndex = splitIndex;
-        hoveredSelectionEdge = selEdge;
-
-        if (splitIndex >= 0 || selEdge >= 0) {
-          waveCanvas.style.cursor = 'col-resize';
-        } else {
-          waveCanvas.style.cursor = 'pointer';
-        }
-
-        drawWaveform();
-      });
-
-
-      document.addEventListener('mouseup', () => {
-        // finalize split point drag: sort splitPoints so order is correct afterwards
-        if (isDraggingSplitPoint) {
-          // small de-duplication guard
-          splitPoints = Array.from(new Set(splitPoints)).sort((a, b) => a - b);
-          // update selectedSegment if it had been tied to the moved split's original time:
-          if (selectedSegment && draggedSplitOriginalTime != null) {
-            // If either boundary approx matched original time, replace with the new moved value
-            if (approxEqual(selectedSegment[0], draggedSplitOriginalTime, 0.01)) {
-              // find nearest split point to the moved time
-              let closest = null, idx = -1, dist = Infinity;
-              for (let i = 0; i < splitPoints.length; i++) {
-                const d = Math.abs(splitPoints[i] - draggedSplitOriginalTime);
-                if (d < dist) { dist = d; closest = splitPoints[i]; idx = i; }
-              }
-              if (closest != null) selectedSegment[0] = closest;
-            }
-            if (approxEqual(selectedSegment[1], draggedSplitOriginalTime, 0.01)) {
-              let closest = null, idx = -1, dist = Infinity;
-              for (let i = 0; i < splitPoints.length; i++) {
-                const d = Math.abs(splitPoints[i] - draggedSplitOriginalTime);
-                if (d < dist) { dist = d; closest = splitPoints[i]; idx = i; }
-              }
-              if (closest != null) selectedSegment[1] = closest;
-            }
-          }
-        }
-
-        isDragging = false;
-        isDraggingSplitPoint = false;
-        draggedSplitIndex = -1;
-        draggedSplitOriginalTime = null;
-
-        isDraggingSelectionEdge = false;
-        draggingSelectionEdgeSide = -1;
-
-        hoveredSplitIndex = -1;
-        hoveredSelectionEdge = -1;
-      });
-
+      // ---- canvas ----
       function setupCanvas() {
         const ratio = window.devicePixelRatio || 1;
         const containerWidth = Math.max(800, waveScroll.clientWidth);
@@ -806,7 +610,7 @@
         ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       }
 
-      function drawWaveform(highlightSegment = selectedSegment) {
+      function drawWaveform(highlightSegment) {
         const w = waveCanvas.width / (window.devicePixelRatio || 1);
         const h = 160;
         ctx.clearRect(0, 0, w, h);
@@ -823,507 +627,337 @@
           }
         }
 
-        // Draw yellow split points
+        // split points
         if (audio.duration && splitPoints.length) {
           for (let index = 0; index < splitPoints.length; index++) {
             const time = splitPoints[index];
             const x = (time / audio.duration) * w;
-
-            // base line (thinner)
-            ctx.strokeStyle = "yellow";
-            ctx.lineWidth = 1; // reduced from 2
+            ctx.strokeStyle = (index === hoveredSplitIndex) ? "orange" : "yellow";
+            ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, h);
             ctx.stroke();
-
-            // hovered or dragged thinner line
-            if (index === hoveredSplitIndex) {
-              ctx.strokeStyle = "orange";
-              ctx.lineWidth = 1; // reduced from 4
-              ctx.beginPath();
-              ctx.moveTo(x, 0);
-              ctx.lineTo(x, h);
-              ctx.stroke();
-            }
-
-            // draw small handle caps (thinner)
             ctx.fillStyle = (index === hoveredSplitIndex) ? "orange" : "yellow";
-            const capW = 8; // reduced from 8
-            ctx.fillRect(x - capW / 2, 6, capW, 6); // top handle
-            ctx.fillRect(x - capW / 2, h - 12, capW, 6); // bottom handle
+            const capW = 8;
+            ctx.fillRect(x - capW / 2, 6, capW, 6);
+            ctx.fillRect(x - capW / 2, h - 12, capW, 6);
           }
         }
 
-        // Highlight selected segment (if any)
-        if (highlightSegment && audio.duration) {
-          const x1 = (highlightSegment[0] / audio.duration) * w;
-          const x2 = (highlightSegment[1] / audio.duration) * w;
+        // selected segment
+        const seg = highlightSegment || selectedSegment;
+        if (seg && audio.duration) {
+          const x1 = (seg[0] / audio.duration) * w;
+          const x2 = (seg[1] / audio.duration) * w;
           ctx.fillStyle = "rgba(255,255,0,0.18)";
           ctx.fillRect(x1, 0, x2 - x1, h);
-
           ctx.fillStyle = "rgba(255,255,0,0.9)";
-          ctx.fillRect(x1 - 1, 0, 2, h); // left thin handle
-          ctx.fillRect(x2 - 1, 0, 2, h); // right thin handle
-
-          // If hovering near selection edge, keep thin (just color change)
+          ctx.fillRect(x1 - 1, 0, 2, h);
+          ctx.fillRect(x2 - 1, 0, 2, h);
           if (hoveredSelectionEdge === 0) {
             ctx.fillStyle = "orange";
-            ctx.fillRect(x1 - 1, 0, 2, h); // same thin width
+            ctx.fillRect(x1 - 1, 0, 2, h);
           } else if (hoveredSelectionEdge === 1) {
             ctx.fillStyle = "orange";
             ctx.fillRect(x2 - 1, 0, 2, h);
           }
         }
 
-        // Draw red playhead on top
+        // playhead
         if (audio.duration && audio.duration > 0) {
-          const playheadPos = (audio.currentTime / audio.duration) * w;
+          const ph = (audio.currentTime / audio.duration) * w;
           ctx.strokeStyle = "rgba(239,68,68,0.95)";
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.moveTo(playheadPos, 0);
-          ctx.lineTo(playheadPos, h);
+          ctx.moveTo(ph, 0);
+          ctx.lineTo(ph, h);
           ctx.stroke();
         }
       }
-      // Export functionality
-      exportBtn.addEventListener('click', () => {
-        exportOptions.style.display = exportOptions.style.display === 'block' ? 'none' : 'block';
-      });
 
-      document.addEventListener('click', (e) => {
-        if (!waveScroll.contains(e.target) &&
-          selectedSegment !== null &&
-          e.target !== splitBtn &&
-          e.target !== dltBtn &&
-          e.target !== exportBtn &&
-          !exportOptions.contains(e.target)) {
-          selectedSegment = null;
-          drawWaveform();
-        }
-      });
-
-      async function exportAudio(format) {
-        if (!audio.src) {
-          showSpecialPopup("No audio to export!");
-          return;
-        }
-
-        showLoading(true); // true indicates this is for export
-        let exportCancelled = false;
-
-        try {
-          // Get current speed rate
-          const currentSpeed = parseFloat(rateSelect.value);
-
-          // Fetch the current (possibly edited) audio data
-          const response = await fetch(audio.src);
-          const blob = await response.blob();
-          const reader = new FileReader();
-
-          reader.onload = async function () {
-            if (exportCancelled) {
-              hideLoading();
-              return;
-            }
-
-            const audioData = reader.result;
-            const tempFileName = `edited_audio_${Date.now()}.wav`;
-
-            try {
-              // Step 1: Save the edited file in backend
-              const saveResult = await window.pywebview.api.save_audio_file(audioData, tempFileName);
-
-              if (!saveResult.success) {
-                showSpecialPopup("Failed to save edited audio before export!");
-                hideLoading();
-                return;
-              }
-
-              if (exportCancelled) {
-                hideLoading();
-                return;
-              }
-
-              // Step 2: Now export the saved edited version with speed adjustment
-              const exportResult = await window.pywebview.api.export_audio(format, currentSpeed);
-
-              if (exportCancelled) {
-                hideLoading();
-                return;
-              }
-
-              if (exportResult.success) {
-                showSpecialPopup(`✅ Exported successfully with ${currentSpeed}x speed! Saved as ${format.toUpperCase()}`);
-              } else {
-                if (exportResult.error !== "Export cancelled") {
-                  showSpecialPopup(`❌ Export failed: ${exportResult.error}`);
-                }
-              }
-            } catch (err) {
-              console.error("Export error:", err);
-              if (!exportCancelled) {
-                showSpecialPopup("Export failed due to internal error.");
-              }
-            } finally {
-              hideLoading();
-            }
-          };
-
-          reader.readAsDataURL(blob);
-
-          // Handle cancellation
-          cancelBtn.onclick = () => {
-            exportCancelled = true;
-            window.pywebview.api.cancel_export();
-            hideLoading();
-            showSpecialPopup("Export cancelled");
-          };
-
-        } catch (err) {
-          console.error("Export preparation error:", err);
-          if (!exportCancelled) {
-            showSpecialPopup("Failed to prepare edited audio for export.");
+      function updateTimingDisplay() {
+        if (audio.duration) {
+          const speed = parseFloat(rateSelect.value) || 1;
+          const adj = audio.duration / speed;
+          rightLabel.textContent = formatTime(adj);
+          if (!audio.paused) {
+            leftLabel.textContent = formatTime(audio.currentTime / speed);
           }
-          hideLoading();
         }
       }
-      // Handle export option click
-      exportOptions.querySelectorAll('div').forEach(opt => {
-        opt.addEventListener('click', () => {
-          const format = opt.getAttribute('data-format');
-          exportAudio(format);
-          exportOptions.style.display = 'none';
-        });
-      });
 
-      // Reuse existing WAV converter
-      function bufferToWav(abuffer) {
-        const numOfChan = abuffer.numberOfChannels,
-          length = abuffer.length * numOfChan * 2 + 44,
-          buffer = new ArrayBuffer(length),
-          view = new DataView(buffer),
-          channels = [],
-          sampleRate = abuffer.sampleRate;
-        let pos = 0;
-        function writeString(s) { for (let i = 0; i < s.length; i++) view.setUint8(pos++, s.charCodeAt(i)); }
-        writeString('RIFF'); view.setUint32(pos, length - 8, true); pos += 4;
-        writeString('WAVE'); writeString('fmt '); view.setUint32(pos, 16, true); pos += 4;
-        view.setUint16(pos, 1, true); pos += 2;
-        view.setUint16(pos, numOfChan, true); pos += 2;
-        view.setUint32(pos, sampleRate, true); pos += 4;
-        view.setUint32(pos, sampleRate * 2 * numOfChan, true); pos += 4;
-        view.setUint16(pos, numOfChan * 2, true); pos += 2;
-        view.setUint16(pos, 16, true); pos += 2;
-        writeString('data'); view.setUint32(pos, length - pos - 4, true); pos += 4;
-        for (let i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
-        for (let i = 0; i < abuffer.length; i++) for (let ch = 0; ch < numOfChan; ch++) {
-          let sample = Math.max(-1, Math.min(1, channels[ch][i]));
-          view.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-          pos += 2;
-        }
-        return new Blob([buffer], { type: "audio/wav" });
-      }
-
-      function animate() {
-        drawWaveform();
-        rafId = requestAnimationFrame(animate);
-      }
-
-      playBtn.onclick = () => {
-        if (!audio.src) return;
-        if (audio.paused) audio.play(); else audio.pause();
-      };
-
+      // ---- audio events ----
       audio.onplay = () => {
-        icon.innerHTML = `<rect x="6" y="4" width="3" height="16" rx="0.6"></rect><rect x="14" y="4" width="3" height="16" rx="0.6"></rect>`;
+        icon.innerHTML =
+          `<rect x="6" y="4" width="3" height="16" rx="0.6"></rect><rect x="14" y="4" width="3" height="16" rx="0.6"></rect>`;
         if (!rafId) animate();
       };
 
       audio.onpause = () => {
         icon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
-        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
       };
 
-      audio.onended = () => { audio.currentTime = 0; drawWaveform(); };
-
-      function formatTime(seconds) {
-        if (!seconds || isNaN(seconds)) return "00:00:00:00";
-        const hrs = Math.floor(seconds / 3600);
-        const mins = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-        const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
-        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}:${String(ms).padStart(3, '0')}`;
-      }
-
+      audio.onended = () => {
+        audio.currentTime = 0;
+        drawWaveform();
+      };
 
       audio.ontimeupdate = () => {
-        const currentSpeed = parseFloat(rateSelect.value);
-        leftLabel.textContent = formatTime(audio.currentTime / currentSpeed);
+        const speed = parseFloat(rateSelect.value) || 1;
+        leftLabel.textContent = formatTime(audio.currentTime / speed);
       };
 
-      // Update audio.onloadedmetadata to show adjusted duration initially:
       audio.onloadedmetadata = () => {
         updateTimingDisplay();
         drawWaveform();
       };
 
-      rateSelect.onchange = () => {
-        audio.playbackRate = parseFloat(rateSelect.value);
-        updateTimingDisplay();
-      };
-
-      function updateTimingDisplay() {
-        if (audio.duration) {
-          const currentSpeed = parseFloat(rateSelect.value);
-          const originalDuration = audio.duration;
-          const adjustedDuration = originalDuration / currentSpeed;
-
-          rightLabel.textContent = formatTime(adjustedDuration);
-
-          // Also update the current time display if needed
-          if (!audio.paused) {
-            leftLabel.textContent = formatTime(audio.currentTime / currentSpeed);
-          }
+      // ---- mouse events ----
+      waveCanvas.addEventListener('mousedown', (e) => {
+        if (!audio.duration || e.button !== 0) return;
+        const splitIdx = isNearSplitPoint(e.clientX);
+        if (splitIdx >= 0) {
+          isDraggingSplitPoint = true;
+          draggedSplitIndex = splitIdx;
+          draggedSplitOriginalTime = splitPoints[splitIdx];
+          e.preventDefault();
+          return;
         }
-      }
+        const selEdge = isNearSelectionEdge(e.clientX);
+        if (selEdge >= 0) {
+          isDraggingSelectionEdge = true;
+          draggingSelectionEdgeSide = selEdge;
+          e.preventDefault();
+          return;
+        }
+        isDragging = true;
+        handleSeek(e.clientX);
+      });
 
+      document.addEventListener('mousemove', (e) => {
+        if (!audio.duration) return;
+        const rect = waveCanvas.getBoundingClientRect();
+        const scrollLeft = waveScroll.scrollLeft;
+        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
+        let x = e.clientX - rect.left + scrollLeft;
+        x = clamp(x, 0, totalWidth);
+        const newTime = (x / totalWidth) * audio.duration;
 
-      btnSelect.onclick = () => {
-        fileInput.value = "";
-        fileInput.click();
-      };
-
-      fileInput.onchange = async (ev) => {
-        const file = ev.target.files[0];
-        if (!file) return;
-
-        if (!file.type.startsWith("audio/")) {
-          showSpecialPopup("Invalid file type. Please choose an audio file (MP3, WAV, AAC).");
+        if (isDraggingSplitPoint && draggedSplitIndex >= 0) {
+          const prev = (draggedSplitIndex > 0) ? splitPoints[draggedSplitIndex - 1] : 0;
+          const next = (draggedSplitIndex < splitPoints.length - 1) ? splitPoints[draggedSplitIndex + 1] : audio
+            .duration;
+          splitPoints[draggedSplitIndex] = clamp(newTime, prev + EPS, next - EPS);
+          if (selectedSegment) {
+            if (approxEqual(selectedSegment[0], draggedSplitOriginalTime, 0.01)) {
+              selectedSegment[0] = splitPoints[draggedSplitIndex];
+              if (selectedSegment[0] >= selectedSegment[1]) selectedSegment[0] = Math.max(0, selectedSegment[
+                1] - EPS);
+            }
+            if (approxEqual(selectedSegment[1], draggedSplitOriginalTime, 0.01)) {
+              selectedSegment[1] = splitPoints[draggedSplitIndex];
+              if (selectedSegment[1] <= selectedSegment[0]) selectedSegment[1] = Math.min(audio.duration,
+                selectedSegment[0] + EPS);
+            }
+          }
+          hoveredSplitIndex = draggedSplitIndex;
+          waveCanvas.style.cursor = 'col-resize';
+          drawWaveform();
           return;
         }
 
-        showLoading();
-        cancelLoading = false;
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-
-          const data = decoded.getChannelData(0);
-          const containerWidth = Math.max(1200, waveScroll.clientWidth * 2);
-          const step = Math.ceil(data.length / containerWidth / 2);
-          const bars = [];
-
-          for (let i = 0; i < data.length; i += step) {
-            if (cancelLoading) break;
-            let max = 0;
-            const end = Math.min(i + step, data.length);
-            for (let j = i; j < end; j++) max = Math.max(max, Math.abs(data[j]));
-            bars.push(max);
+        if (isDraggingSelectionEdge && selectedSegment) {
+          if (draggingSelectionEdgeSide === 0) {
+            selectedSegment[0] = clamp(newTime, 0, selectedSegment[1] - 0.01);
+          } else {
+            selectedSegment[1] = clamp(newTime, selectedSegment[0] + 0.01, audio.duration);
           }
-
-          if (!cancelLoading) {
-            waveform = bars;
-            splitPoints = [];
-            selectedSegment = null;
-            const url = URL.createObjectURL(file);
-            audio.src = url;
-            audio.playbackRate = 1;
-            rateSelect.value = "1";
-            audio.currentTime = 0;
-            audio.load();
-            icon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
-            fileTitleEl.textContent = file.name;
-            canvasWidth = Math.max(800, waveform.length);
-            setupCanvas();
-            drawWaveform();
-            updateTimingDisplay();
-
-            // Set current audio in backend
-            if (window.pywebview && window.pywebview.api && window.pywebview.api.set_current_audio) {
-              // Create a temporary file for the backend
-              const tempResponse = await fetch(url);
-              const tempBlob = await tempResponse.blob();
-              const tempFile = new File([tempBlob], file.name, { type: file.type });
-
-              const reader = new FileReader();
-              reader.onload = async function () {
-                const audioData = reader.result;
-                await window.pywebview.api.save_audio_file(audioData, file.name);
-              };
-              reader.readAsDataURL(tempFile);
+          for (let i = 0; i < splitPoints.length; i++) {
+            if (approxEqual(splitPoints[i], selectedSegment[0], 0.015) && draggingSelectionEdgeSide === 0) {
+              splitPoints[i] = selectedSegment[0];
+            }
+            if (approxEqual(splitPoints[i], selectedSegment[1], 0.015) && draggingSelectionEdgeSide === 1) {
+              splitPoints[i] = selectedSegment[1];
             }
           }
-
-          audioCtx.close();
-        } catch (err) {
-          console.error('File processing error:', err);
-          showSpecialPopup("Failed to process audio file.");
-        } finally {
-          hideLoading();
+          waveCanvas.style.cursor = 'col-resize';
+          drawWaveform();
+          return;
         }
+
+        if (isDragging && e.buttons === 1) {
+          audio.currentTime = newTime;
+          drawWaveform();
+          return;
+        }
+
+        const splitIdx = isNearSplitPoint(e.clientX);
+        const selEdge = isNearSelectionEdge(e.clientX);
+        hoveredSplitIndex = splitIdx;
+        hoveredSelectionEdge = selEdge;
+        waveCanvas.style.cursor = (splitIdx >= 0 || selEdge >= 0) ? 'col-resize' : 'pointer';
+        drawWaveform();
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDraggingSplitPoint) {
+          splitPoints = Array.from(new Set(splitPoints)).sort((a, b) => a - b);
+          if (selectedSegment && draggedSplitOriginalTime != null) {
+            if (approxEqual(selectedSegment[0], draggedSplitOriginalTime, 0.01)) {
+              let closest = null,
+                dist = Infinity;
+              for (let i = 0; i < splitPoints.length; i++) {
+                const d = Math.abs(splitPoints[i] - draggedSplitOriginalTime);
+                if (d < dist) {
+                  dist = d;
+                  closest = splitPoints[i];
+                }
+              }
+              if (closest != null) selectedSegment[0] = closest;
+            }
+            if (approxEqual(selectedSegment[1], draggedSplitOriginalTime, 0.01)) {
+              let closest = null,
+                dist = Infinity;
+              for (let i = 0; i < splitPoints.length; i++) {
+                const d = Math.abs(splitPoints[i] - draggedSplitOriginalTime);
+                if (d < dist) {
+                  dist = d;
+                  closest = splitPoints[i];
+                }
+              }
+              if (closest != null) selectedSegment[1] = closest;
+            }
+          }
+        }
+        isDragging = false;
+        isDraggingSplitPoint = false;
+        draggedSplitIndex = -1;
+        draggedSplitOriginalTime = null;
+        isDraggingSelectionEdge = false;
+        draggingSelectionEdgeSide = -1;
+        hoveredSplitIndex = -1;
+        hoveredSelectionEdge = -1;
+      });
+
+      // ---- split ----
+      splitBtn.onclick = () => {
+        if (!audio.src || !audio.duration || !waveform) {
+          showSpecialPopup("No audio loaded to split!");
+          return;
+        }
+        splitPoints.push(audio.currentTime);
+        splitPoints = Array.from(new Set(splitPoints.sort((a, b) => a - b)));
+        drawWaveform();
       };
 
-      // ===== Delete selected segment =====
+      // ---- context menu (segment select) ----
+      waveCanvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (!audio.duration || splitPoints.length === 0) {
+          selectedSegment = null;
+          drawWaveform();
+          return;
+        }
+        const rect = waveCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left + waveScroll.scrollLeft;
+        const totalWidth = waveCanvas.width / (window.devicePixelRatio || 1);
+        const ratio = Math.max(0, Math.min(1, x / totalWidth));
+        const clickTime = ratio * audio.duration;
+        const sorted = splitPoints.slice().sort((a, b) => a - b);
+        let start = 0,
+          end = audio.duration;
+        for (let i = 0; i < sorted.length; i++) {
+          if (clickTime < sorted[i]) {
+            end = sorted[i];
+            start = i > 0 ? sorted[i - 1] : 0;
+            break;
+          }
+        }
+        if (clickTime >= (sorted[sorted.length - 1] || 0)) {
+          start = sorted.length ? sorted[sorted.length - 1] : 0;
+          end = audio.duration;
+        }
+        if (end - start <= 0.001) selectedSegment = null;
+        else selectedSegment = [start, end];
+        drawWaveform();
+      });
+
+      // ---- delete ----
       dltBtn.onclick = async () => {
         saveState();
         if (!selectedSegment || !audio.src || !waveform) {
           showSpecialPopup("No segment selected!");
           return;
         }
-
-        showLoading();
+        showLoading(false);
         cancelDelete = false;
-
         try {
           const response = await fetch(audio.src);
           const arrayBuffer = await response.arrayBuffer();
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
           const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-
           const data = decoded.getChannelData(0);
           const sampleRate = decoded.sampleRate;
-
           const start = selectedSegment[0];
           const end = selectedSegment[1];
           const startIndex = Math.round(start * sampleRate);
           const endIndex = Math.round(end * sampleRate);
-
-          if (endIndex <= startIndex) {
-            showSpecialPopup("Invalid segment to delete.");
-            hideLoading();
-            return;
-          }
-
-          if (cancelDelete) {
-            showSpecialPopup("Deletion canceled!");
-            hideLoading();
-            return;
-          }
+          if (endIndex <= startIndex) { showSpecialPopup("Invalid segment."); hideLoading(); return; }
+          if (cancelDelete) { showSpecialPopup("Deletion canceled!"); hideLoading(); return; }
 
           const newLength = data.length - (endIndex - startIndex);
           const newBuffer = audioCtx.createBuffer(1, newLength, sampleRate);
           const newData = newBuffer.getChannelData(0);
-
           const chunkSize = 100000;
           let offset = 0;
           for (let i = 0; i < startIndex; i += chunkSize) {
-            if (cancelDelete) { showSpecialPopup("Deletion canceled!"); hideLoading(); return; }
+            if (cancelDelete) { showSpecialPopup("Canceled!"); hideLoading(); return; }
             const endChunk = Math.min(i + chunkSize, startIndex);
             newData.set(data.subarray(i, endChunk), offset);
             offset += (endChunk - i);
           }
-
           for (let i = endIndex; i < data.length; i += chunkSize) {
-            if (cancelDelete) { showSpecialPopup("Deletion canceled!"); hideLoading(); return; }
+            if (cancelDelete) { showSpecialPopup("Canceled!"); hideLoading(); return; }
             const endChunk = Math.min(i + chunkSize, data.length);
             newData.set(data.subarray(i, endChunk), offset);
             offset += (endChunk - i);
           }
+          if (cancelDelete) { showSpecialPopup("Canceled!"); hideLoading(); return; }
 
-          if (cancelDelete) { showSpecialPopup("Deletion canceled!"); hideLoading(); return; }
-
-          function bufferToWav(abuffer) {
-            const numOfChan = abuffer.numberOfChannels,
-              length = abuffer.length * numOfChan * 2 + 44,
-              buffer = new ArrayBuffer(length),
-              view = new DataView(buffer),
-              channels = [],
-              sampleRate = abuffer.sampleRate;
+          // Build WAV
+          function bufToWav(abuf) {
+            const numChan = abuf.numberOfChannels,
+              len = abuf.length * numChan * 2 + 44,
+              buf = new ArrayBuffer(len),
+              view = new DataView(buf);
             let pos = 0;
-            function writeString(s) { for (let i = 0; i < s.length; i++) view.setUint8(pos++, s.charCodeAt(i)); }
-            writeString('RIFF'); view.setUint32(pos, length - 8, true); pos += 4;
-            writeString('WAVE'); writeString('fmt '); view.setUint32(pos, 16, true); pos += 4;
-            view.setUint16(pos, 1, true); pos += 2;
-            view.setUint16(pos, numOfChan, true); pos += 2;
-            view.setUint32(pos, sampleRate, true); pos += 4;
-            view.setUint32(pos, sampleRate * 2 * numOfChan, true); pos += 4;
-            view.setUint16(pos, numOfChan * 2, true); pos += 2;
-            view.setUint16(pos, 16, true); pos += 2;
-            writeString('data'); view.setUint32(pos, length - pos - 4, true); pos += 4;
-            for (let i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
-            for (let i = 0; i < abuffer.length; i++) for (let ch = 0; ch < numOfChan; ch++) {
-              let sample = Math.max(-1, Math.min(1, channels[ch][i]));
-              view.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-              pos += 2;
-            }
-            return new Blob([buffer], { type: "audio/wav" });
-          }
 
-          const wavBlob = bufferToWav(newBuffer);
-
-          const removedDuration = end - start;
-          splitPoints = splitPoints.filter(pt => pt < start || pt > end).map(pt => pt > end ? pt - removedDuration : pt).sort((a, b) => a - b);
-          if (waveform && waveform.length > 0) {
-            const startRatio = startIndex / data.length;
-            const endRatio = endIndex / data.length;
-            const startBar = Math.floor(startRatio * waveform.length);
-            const endBar = Math.ceil(endRatio * waveform.length);
-            waveform.splice(startBar, endBar - startBar);
-          }
-
-          audio.src = URL.createObjectURL(wavBlob);
-          audio.pause();
-          icon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
-          audio.playbackRate = 1;
-          rateSelect.value = "1";
-          await audio.load();
-          selectedSegment = null;
-          setupCanvas();
-          drawWaveform();
-
-          showSpecialPopup("Segment deleted successfully!");
-          audioCtx.close();
-        } catch (err) {
-          console.error(err);
-          if (!cancelDelete) showSpecialPopup("Failed to delete segment.");
-        } finally {
-          hideLoading();
-        }
-      };
-
-
-      document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key.toLowerCase() === 'z') {
-          e.preventDefault();
-          const last = undoStack.pop();
-          if (last) {
-            redoStack.push({
-              src: audio.src,
-              waveform: [...waveform],
-              splitPoints: [...splitPoints]
-            });
-            restoreState(last);
-            showSpecialPopup("Undo successful!");
-          } else {
-            showSpecialPopup("Nothing to undo.");
-          }
-        }
-        if (e.ctrlKey && e.key.toLowerCase() === 'y') {
-          e.preventDefault();
-          const next = redoStack.pop();
-          if (next) {
-            undoStack.push({
-              src: audio.src,
-              waveform: [...waveform],
-              splitPoints: [...splitPoints]
-            });
-            restoreState(next);
-            showSpecialPopup("Redo successful!");
-          } else {
-            showSpecialPopup("Nothing to redo.");
-          }
-        }
-      });
-
-      window.addEventListener('resize', () => { setupCanvas(); drawWaveform(); });
-      setupCanvas();
-      drawWaveform();
-    })();
-  </script>
-
-</body>
-
-</html>
+            function writeStr(s) { for (let i = 0; i < s.length; i++) view.setUint8(pos++, s.charCodeAt(i)); }
+            writeStr('RIFF');
+            view.setUint32(pos, len - 8, true);
+            pos += 4;
+            writeStr('WAVE');
+            writeStr('fmt ');
+            view.setUint32(pos, 16, true);
+            pos += 4;
+            view.setUint16(pos, 1, true);
+            pos += 2;
+            view.setUint16(pos, numChan, true);
+            pos += 2;
+            view.setUint32(pos, abuf.sampleRate, true);
+            pos += 4;
+            view.setUint32(pos, abuf.sampleRate * 2 * numChan, true);
+            pos += 4;
+            view.setUint16(pos, numChan * 2, true);
+            pos += 2;
+            view.setUint16(pos, 16, true);
+            pos += 2;
+            writeStr('data');
+            view.setUint32(pos, len - pos - 4, true);
+            pos += 4;
+            con
