@@ -1,254 +1,31 @@
-import os
-os.environ["PATH"] += os.pathsep + r"H:\My Drive\MODELS\ffmpeg\bin"
 import ctypes
-import time
-import webview
-import tempfile
-from pathlib import Path
-import sys
-from pydub import AudioSegment
-import base64
-from tkinter import filedialog
-import threading
-import signal
 from ctypes import wintypes
+import os
+import base64
+import sys
+import threading
+import time
+import configparser
+import webview
+import tkinter as tk
+from tkinter import filedialog
 
 
-def resource_path(relative_path):
-    """Get absolute path to resource (for PyInstaller compatibility)"""
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
 
-class WindowIconSetter:
-    def __init__(self, window_title, icon_path):
-        self.window_title = window_title
-        self.icon_path = os.path.abspath(icon_path) if icon_path else None
-        
-        # Windows API
-        self.user32 = ctypes.windll.user32
-        self.shell32 = ctypes.windll.shell32
-        
-    def find_window_by_title(self, title):
-        """Find window by title with partial matching"""
-        hwnd = self.user32.FindWindowW(None, title)
-        if hwnd:
-            return hwnd
-        
-        # If exact match fails, try to enumerate all windows
-        windows = []
-        
-        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-        def enum_windows_callback(hwnd, lParam):
-            length = self.user32.GetWindowTextLengthW(hwnd) + 1
-            buffer = ctypes.create_unicode_buffer(length)
-            self.user32.GetWindowTextW(hwnd, buffer, length)
-            
-            if title in buffer.value:
-                windows.append(hwnd)
-            return True
-        
-        self.user32.EnumWindows(enum_windows_callback, 0)
-        
-        if windows:
-            return windows[0]
-        
-        return None
-    
-    def set_icon(self):
-        """Set icon for the window"""
-        if not self.icon_path or not os.path.exists(self.icon_path):
-            print(f"Icon file not found: {self.icon_path}")
-            return False
-        
-        # Find window
-        hwnd = None
-        for i in range(50):  # Try for 5 seconds
-            hwnd = self.find_window_by_title(self.window_title)
-            if hwnd:
-                break
-            time.sleep(0.1)
-        
-        if not hwnd:
-            print(f"Window '{self.window_title}' not found")
-            return False
-        
-        # Load and set icon
-        try:
-            # Load icon from file
-            LR_LOADFROMFILE = 0x10
-            IMAGE_ICON = 1
-            
-            # Small icon (16x16)
-            hicon_small = self.user32.LoadImageW(
-                0,
-                self.icon_path,
-                IMAGE_ICON,
-                16, 16,
-                LR_LOADFROMFILE
-            )
-            
-            # Large icon (32x32)
-            hicon_large = self.user32.LoadImageW(
-                0,
-                self.icon_path,
-                IMAGE_ICON,
-                32, 32,
-                LR_LOADFROMFILE
-            )
-            
-            # Set icons
-            WM_SETICON = 0x80
-            ICON_SMALL = 0
-            ICON_BIG = 1
-            
-            if hicon_small:
-                self.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
-            
-            if hicon_large:
-                self.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_large)
-            
-            
-            # print(f"Icon set successfully for window '{self.window_title}'")
-            return True
-            
-        except Exception as e:
-            print(f"Error setting icon: {e}")
-            return False
+if sys.platform=="win32":
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("com.example.AudioEditorAppp")
 
-class Api:
-    def __init__(self):
-        self.current_audio_path = None
-        self.window = None
-        self.export_cancelled = False
-        self.current_export_path = None
-        self._lock = threading.Lock()
 
-    def set_window(self, window):
-        self.window = window
+def resource_path(p):
+    try:b=sys._MEIPASS
+    except:b=os.path.abspath(".")
+    return os.path.join(b,p)
 
-    def set_current_audio(self, audio_path):
-        self.current_audio_path = audio_path
-        return True
+data_dir=os.path.join(os.path.expanduser("~"),".AudioEditor")
+os.makedirs(data_dir,exist_ok=True)
+CONFIG_FILE=os.path.join(data_dir,"config.ini")
 
-    def cancel_export(self):
-        """Cancel current export process."""
-        self.export_cancelled = True
-        if self.current_export_path and os.path.exists(self.current_export_path):
-            try:
-                os.remove(self.current_export_path)
-                print(f"Cancelled export and removed: {self.current_export_path}")
-            except Exception as e:
-                print(f"Error removing cancelled export file: {e}")
-        return True
-
-    def export_audio(self, format_type, speed_rate=1.0):
-        """Export the current audio with selected format and speed."""
-        self.export_cancelled = False
-        self.current_export_path = None
-
-        try:
-            if not self.current_audio_path or not os.path.exists(self.current_audio_path):
-                return {"success": False, "error": "No audio file loaded"}
-
-            original_path = Path(self.current_audio_path)
-            default_filename = f"{original_path.stem}_{speed_rate}x.{format_type}"
-
-            export_path = filedialog.asksaveasfilename(
-                defaultextension=f".{format_type}",
-                initialfile=default_filename,
-                filetypes=[(format_type.upper(), f"*.{format_type}")]
-            )
-
-            if not export_path:
-                return {"success": False, "error": "Export cancelled"}
-
-            if self.export_cancelled:
-                return {"success": False, "error": "Export cancelled"}
-
-            audio = AudioSegment.from_file(self.current_audio_path)
-
-            if self.export_cancelled:
-                return {"success": False, "error": "Export cancelled"}
-
-            # Adjust speed if needed
-            if speed_rate != 1.0:
-                new_frame_rate = int(audio.frame_rate * speed_rate)
-                audio = audio._spawn(audio.raw_data, overrides={'frame_rate': new_frame_rate})
-                audio = audio.set_frame_rate(audio.frame_rate)
-
-            if self.export_cancelled:
-                return {"success": False, "error": "Export cancelled"}
-
-            self.current_export_path = export_path
-
-            # Export to selected format
-            if format_type == "mp3":
-                audio.export(export_path, format="mp3", bitrate="192k")
-            elif format_type == "wav":
-                audio.export(export_path, format="wav")
-            elif format_type == "aac":
-                audio.export(export_path, format="adts")
-            elif format_type == "ogg":
-                audio.export(export_path, format="ogg")
-            elif format_type == "flac":
-                audio.export(export_path, format="flac")
-            else:
-                return {"success": False, "error": f"Unsupported format: {format_type}"}
-
-            if self.export_cancelled and os.path.exists(export_path):
-                os.remove(export_path)
-                return {"success": False, "error": "Export cancelled"}
-
-            return {
-                "success": True,
-                "message": f"Audio exported successfully as {format_type.upper()} with {speed_rate}x speed",
-                "file_path": export_path
-            }
-
-        except Exception as e:
-            if self.current_export_path and os.path.exists(self.current_export_path):
-                try:
-                    os.remove(self.current_export_path)
-                except:
-                    pass
-            return {"success": False, "error": str(e)}
-
-        finally:
-            self.current_export_path = None
-
-    def save_audio_file(self, audio_data, filename):
-        """Save a base64-encoded audio file to a temp directory."""
-        try:
-            if audio_data.startswith('data:audio'):
-                audio_data = audio_data.split(',')[1]
-            audio_bytes = base64.b64decode(audio_data)
-            temp_dir = tempfile.gettempdir()
-            temp_path = os.path.join(temp_dir, filename)
-
-            with open(temp_path, 'wb') as f:
-                f.write(audio_bytes)
-            self.current_audio_path = temp_path
-            return {"success": True, "path": temp_path}
-
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def stop_all_processes(self):
-        """Gracefully stop any ongoing processes."""
-        with self._lock:
-            self.export_cancelled = True
-            # print("🛑 Stopping all processes and closing the app...")
-            print("Stopping all processes and closing the app...")
-            if self.current_export_path and os.path.exists(self.current_export_path):
-                try:
-                    os.remove(self.current_export_path)
-                    print(f"Removed temporary export file: {self.current_export_path}")
-                except Exception as e:
-                    print(f"Error removing file: {e}")
-            os._exit(0)  # Immediate stop of all threads and processes
+WINDOW_TITLE = "Audio Editor"
 
 user32 = ctypes.windll.user32
 dwmapi = ctypes.windll.dwmapi
@@ -258,105 +35,189 @@ DWMWA_CAPTION_COLOR = 35
 DWMWA_TEXT_COLOR = 36
 
 
+class Api:
+    def save_export(self, base64_data, filename):
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+
+        ext = os.path.splitext(filename)[1].lower()
+
+        filetypes = {
+            ".mp3": [("MP3 Audio", "*.mp3")],
+            ".wav": [("WAV Audio", "*.wav")],
+            ".aac": [("AAC Audio", "*.aac")],
+            ".ogg": [("OGG Audio", "*.ogg")],
+            ".flac": [("FLAC Audio", "*.flac")]
+        }.get(ext, [("All Audio Files", "*.*")])
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            filetypes=filetypes,
+            initialfile=filename,
+            title="Save Audio As"
+        )
+
+        root.destroy()
+
+        if not file_path:
+            return "cancel"
+
+        with open(file_path, "wb") as f:
+            f.write(base64.b64decode(base64_data))
+
+        return "success"
+
+class Icon:
+    def __init__(self,title,path):
+        self.title=title
+        self.path=os.path.abspath(path) if path else None
+
+    def find(self):
+        hwnd=self.user32.FindWindowW(None,self.title)
+        if hwnd:return hwnd
+        found=[]
+        @ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
+        def cb(hwnd,_):
+            n=self.user32.GetWindowTextLengthW(hwnd)+1
+            b=ctypes.create_unicode_buffer(n)
+            self.user32.GetWindowTextW(hwnd,b,n)
+            if self.title in b.value:found.append(hwnd)
+            return True
+        self.user32.EnumWindows(cb,0)
+        return found[0] if found else None
+
+    @property
+    def user32(self):return ctypes.windll.user32
+
+    def set(self):
+        if not self.path or not os.path.exists(self.path):return
+        hwnd=None
+        for _ in range(50):
+            if hwnd:=self.find():break
+            time.sleep(.1)
+        if not hwnd:return
+        try:
+            for size,msg in ((16,0),(32,1)):
+                icon=self.user32.LoadImageW(0,self.path,1,size,size,0x10)
+                if icon:self.user32.SendMessageW(hwnd,0x80,msg,icon)
+        except:pass
+
+
 def rgb(r, g, b):
-    # Windows COLORREF (0x00BBGGRR)
     return r | (g << 8) | (b << 16)
 
 
-def set_titlebar_red(hwnd):
-    red = ctypes.c_int(rgb(7,16,37))
-    white = ctypes.c_int(rgb(255, 255, 255))
+def set_titlebar_color(hwnd):
+    bg = ctypes.c_int(rgb(7, 16, 37))
+    fg = ctypes.c_int(rgb(255, 255, 255))
 
-    # Red caption
     dwmapi.DwmSetWindowAttribute(
         hwnd,
         DWMWA_CAPTION_COLOR,
-        ctypes.byref(red),
-        ctypes.sizeof(red),
+        ctypes.byref(bg),
+        ctypes.sizeof(bg)
     )
 
-    # White title text
     dwmapi.DwmSetWindowAttribute(
         hwnd,
         DWMWA_TEXT_COLOR,
-        ctypes.byref(white),
-        ctypes.sizeof(white),
+        ctypes.byref(fg),
+        ctypes.sizeof(fg)
     )
 
-    # Red border
     dwmapi.DwmSetWindowAttribute(
         hwnd,
         DWMWA_BORDER_COLOR,
-        ctypes.byref(red),
-        ctypes.sizeof(red),
+        ctypes.byref(bg),
+        ctypes.sizeof(bg)
     )
 
+def load_config():
+    d={"x":None,"y":None,"width":1000,"height":700,"fullscreen":False}
+    try:
+        c=configparser.ConfigParser()
+        if not os.path.exists(CONFIG_FILE):return d
+        c.read(CONFIG_FILE,encoding="utf-8")
+        if "Window" not in c:return d
+        s=c["Window"]
+        d["x"]=None if s.get("x","None").lower()=="none" else int(s["x"])
+        d["y"]=None if s.get("y","None").lower()=="none" else int(s["y"])
+        d["width"]=s.getint("width",fallback=1000)
+        d["height"]=s.getint("height",fallback=700)
+        d["fullscreen"]=s.getboolean("fullscreen",fallback=False)
+    except:pass
+    return d
 
-def wait_and_color():
-    title = "🎵 Audio Editor"
+def save_config(w):
+    try:
+        c=configparser.ConfigParser()
+        c["Window"]={
+            "x":str(w.x),"y":str(w.y),"width":str(w.width),
+            "height":str(w.height),"fullscreen":str(w.fullscreen).lower()
+        }
+        with open(CONFIG_FILE,"w",encoding="utf-8") as f:c.write(f)
+    except:pass
+    
 
+def wait_for_window(window, fullscreen):
     hwnd = 0
 
     while hwnd == 0:
-        hwnd = user32.FindWindowW(None, title)
+        hwnd = user32.FindWindowW(None, WINDOW_TITLE)
         time.sleep(0.05)
 
-    print("HWND:", hwnd)
+    set_titlebar_color(hwnd)
 
-    set_titlebar_red(hwnd)
-
-
-def create_window():
-    html_file = resource_path("assets/index.html")
-    api = Api()
-    window = webview.create_window(
-        "🎵 Audio Editor",
-        f"file://{html_file}",
-        width=1000,
-        height=650,
-        resizable=True,
-        js_api=api,
-        
-    )
-    api.set_window(window)
-    return window, api
+    if fullscreen:
+        time.sleep(0.2)
+        window.toggle_fullscreen()
 
 
-if __name__ == '__main__':
-    try:
-        from pydub import AudioSegment
-    except ImportError:
-        print("Installing pydub and ffmpeg dependencies...")
-        os.system(f"{sys.executable} -m pip install pydub")
+# Load saved settings
+settings = load_config()
+user32=ctypes.windll.user32
+dwmapi=ctypes.windll.dwmapi
+title_bar = 7 | (16 << 8) | (37 << 16)
+WHITE=255|(255<<8)|(255<<16)
 
-    if sys.platform == "win32":
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("com.example.AudioEditorApp")
-    
-    
+def titlebar():
+    while not (hwnd:=user32.FindWindowW(None,"PDF Text Editor")):time.sleep(.05)
+    for attr,color in ((35,title_bar),(36,WHITE),(34,title_bar)):
+        v=ctypes.c_int(color)
+        dwmapi.DwmSetWindowAttribute(hwnd,attr,ctypes.byref(v),ctypes.sizeof(v))
 
-    # Apply .ico window icon
-    icon_path = resource_path(r"assets\icon.ico")  # (make sure icon.ico exists)
-    icon_setter = WindowIconSetter("🎵 Audio Editor", icon_path)
 
-    def apply_icon_async(): 
-        time.sleep(1)
-        icon_setter.set_icon()
+# Read HTML
+with open(r"assets/index.html", "r", encoding="utf-8") as f:
+    html = f.read()
 
-    threading.Thread(target=apply_icon_async, daemon=True).start()
+html_path=resource_path("assets/index.html")
+# Create window
+args={
+    "title":"PDF Text Editor",
+    "url":html_path,
+    "width":settings["width"],
+    "height":settings["height"],
+    "fullscreen":settings["fullscreen"],
+    "js_api":Api()
+}
+if settings["x"] is not None:args["x"]=settings["x"]
+if settings["y"] is not None:args["y"]=settings["y"]
 
-    window, api = create_window()
-    # Add shutdown handler for window close
-    def on_close():
-        api.stop_all_processes()
+window=webview.create_window(**args)
 
-    window.events.closing += on_close
+# Save geometry before the window closes
+window.events.closing += lambda: save_config(window)
 
-    # Ctrl+C / SIGINT handler
-    def handle_exit(signum, frame):
-        api.stop_all_processes()
+# Apply titlebar color and restore fullscreen state
+threading.Thread(
+    target=wait_for_window,
+    args=(window, settings["fullscreen"]),
+    daemon=True
+).start()
+threading.Thread(target=titlebar,daemon=True).start()
+icon=Icon("PDF Text Editor",resource_path(r"assets\icon.ico"))
+threading.Thread(target=lambda:(time.sleep(1),icon.set()),daemon=True).start()
 
-    signal.signal(signal.SIGINT, handle_exit)
-    signal.signal(signal.SIGTERM, handle_exit)
-
-    threading.Thread(target=wait_and_color, daemon=True).start()
-    webview.start()
+webview.start()
